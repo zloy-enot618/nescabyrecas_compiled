@@ -23,20 +23,14 @@ jobs:
         context: .
         push: false
         tags: nesca-builder:latest
-        # Загружаем образ в локальный демон Docker, чтобы из него можно было извлечь файлы
-        load: true
-        # Включаем кэширование, чтобы ускорить повторные сборки
+        load: true # Обязательно, чтобы образ загрузился в локальный докер
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Extract nesca binary from image
       run: |
-        # Создаём временный контейнер из собранного образа
         docker create --name nesca-container nesca-builder:latest
-        # Копируем исполняемый файл из контейнера на хост-машину раннера
-        # Путь /home/user/nesca/nesca взят из вашего Dockerfile
         docker cp nesca-container:/home/user/nesca/nesca ./nesca
-        # Удаляем временный контейнер
         docker rm nesca-container
 
     - name: Upload nesca binary as artifact
