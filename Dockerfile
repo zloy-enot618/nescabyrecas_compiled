@@ -1,28 +1,20 @@
-# Minimal docker container to build Nesca
-
+# Бронебойный Dockerfile для сборки Nesca
 FROM ubuntu:14.04
-MAINTAINER Pantyusha <pantene@pere.val>
 
-ENV DEBIAN_FRONTEND noninteractive
-ENV QT_PATH /opt/Qt
-ENV QT_DESKTOP $QT_PATH/5.4/gcc_64
-ENV PATH $QT_DESKTOP/bin:$PATH
+ENV DEBIAN_FRONTEND=noninteractive
+ENV QT_PATH=/opt/Qt
+ENV QT_DESKTOP=$QT_PATH/5.4/gcc_64
+ENV PATH=$QT_DESKTOP/bin:$PATH
 
-# [ИСПРАВЛЕНИЕ 1] Отключаем IPv6 для apt (часто вызывает зависания на старых зеркалах)
+# 1. Форсируем IPv4 (чтобы apt не зависал на старых серверах)
 RUN echo "Acquire::ForceIPv4 \"true\";" > /etc/apt/apt.conf.d/99force-ipv4
 
-# [ИСПРАВЛЕНИЕ 2] Переключаем репозитории на архивные (для Ubuntu 14.04)
-RUN sed -i -e 's/archive.ubuntu.com\|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+# 2. Переводим репозитории на архивные и включаем исходники (deb-src)
+RUN sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list \
+    && sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list \
+    && sed -i 's/^# deb-src /deb-src /g' /etc/apt/sources.list
 
-# [ИСПРАВЛЕНИЕ 3] Раскомментируем строки deb-src, чтобы работал build-dep
-RUN sed -i -e 's/^# deb-src /deb-src /' /etc/apt/sources.list
-
-# Install updates & requirements:
-#  * git, openssh-client, ca-certificates - clone & build
-#  * curl, p7zip - to download & unpack Qt bundle
-#  * build-essential, pkg-config, libgl1-mesa-dev - basic Qt build requirements
-#  * libsm6, libice6, libxext6, libxrender1, libfontconfig1 - dependencies of Qt bundle run-file
-# [ИСПРАВЛЕНИЕ 4] Убран dist-upgrade и флаг -qq, чтобы видеть процесс и не тратить время впустую
+# 3. Ставим базовые зависимости (без dist-upgrade и без -qq, чтобы видеть прогресс)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
@@ -43,19 +35,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Update curl
-# [ИСПРАВЛЕНИЕ 5] Добавлен apt-get update перед build-dep и обновлена ссылка на curl.se
-RUN apt-get -qq update \
-    && apt-get -qq build-dep -y curl \
-    && wget https://curl.se/download/curl-7.50.2.tar.bz2 \
+# 4. Обновляем curl (починена ссылка на curl.se, добавлен --retry)
+RUN apt-get update \
+    && apt-get build-dep -y curl \
+    && wget -q --retry-connrefused --tries=3 https://curl.se/download/curl-7.50.2.tar.bz2 \
     && tar -xvjf curl-7.50.2.tar.bz2 \
     && cd curl-7.50.2 \
     && ./configure \
-    && make install
+    && make -j$(nproc) \
+    && make install \
+    && cd .. && rm -rf curl-7.50.2*
 
-# Install Qt 5.4.2
+# 5. Качаем и ставим Qt 5.4.2 (используем надежное зеркало, добавлен --retry)
 RUN mkdir -p /tmp/qt \
-    && curl -Lo /tmp/qt/installer.run 'https://download.qt.io/archive/qt/5.4/5.4.2/qt-opensource-linux-x64-5.4.2.run' \
+    && curl -fL --retry 3 -o /tmp/qt/installer.run 'https://mirrors.ocf.berkeley.edu/qt/archive/qt/5.4/5.4.2/qt-opensource-linux-x64-5.4.2.run' \
     && chmod 755 /tmp/qt/installer.run && /tmp/qt/installer.run --dump-binary-data -o /tmp/qt/data \
     && mkdir $QT_PATH && cd $QT_PATH \
     && 7zr x /tmp/qt/data/qt.54.gcc_64/5.4.2-0qt5_essentials.7z > /dev/null \
@@ -64,23 +57,21 @@ RUN mkdir -p /tmp/qt \
     && /tmp/qt/installer.run --runoperation QtPatch linux $QT_DESKTOP qt5 \
     && rm -rf /tmp/qt
 
-# Install multimedia dependencies
-RUN apt-get -qq install -y --no-install-recommends qtmultimedia5-dev
+# 6. Мультимедиа зависимости для Qt
+RUN apt-get install -y --no-install-recommends qtmultimedia5-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Download Nesca
+# 7. Клонируем исходники Nesca
 RUN cd /tmp && git clone https://github.com/pantyusha/nesca.git
 
-# Compile
-RUN cd /tmp/nesca && qmake && make
+# 8. Компилируем (используем все ядра)
+RUN cd /tmp/nesca && qmake && make -j$(nproc)
 
-# Add group & user
-RUN groupadd -r user && useradd --create-home --gid user user && echo 'user ALL=NOPASSWD: ALL' > /etc/sudoers.d/user
-
-# Move to user dir 
-RUN mv /tmp/nesca /home/user/
+# 9. Создаем юзера
+RUN groupadd -r user && useradd --create-home --gid user user \
+    && echo 'user ALL=NOPASSWD: ALL' > /etc/sudoers.d/user \
+    && mv /tmp/nesca /home/user/
 
 USER user
 WORKDIR /home/user/nesca
-ENV HOME /home/user
-
-ENTRYPOINT ["/home/user/nesca/nesca"]
+ENV HOME=/home/user
