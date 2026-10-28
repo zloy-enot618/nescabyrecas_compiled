@@ -1,34 +1,47 @@
-name: Build Docker Image
+name: Build Nesca
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
 
 jobs:
-  build:
+  build-and-extract:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      # Шаг 1 (опционально, но рекомендуется): Настройка Buildx для продвинутой сборки
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      # Шаг 2: Сборка образа. Параметр `context: .` — это аналог точки в вашей команде `docker build .`
-      - name: Build Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false  # Мы пока не отправляем образ в реестр (например, Docker Hub)
-          tags: my-app:latest
-          # Сохраняем образ в файл, чтобы потом загрузить его как артефакт
-          outputs: type=docker,dest=/tmp/image.tar
+    - name: Build Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: false
+        tags: nesca-builder:latest
+        # Загружаем образ в локальный демон Docker, чтобы из него можно было извлечь файлы
+        load: true
+        # Включаем кэширование, чтобы ускорить повторные сборки
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
-      # Шаг 3: Сохранение образа как артефакта для скачивания
-      - name: Upload Docker image as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: /tmp/image.tar
-          retention-days: 1
+    - name: Extract nesca binary from image
+      run: |
+        # Создаём временный контейнер из собранного образа
+        docker create --name nesca-container nesca-builder:latest
+        # Копируем исполняемый файл из контейнера на хост-машину раннера
+        # Путь /home/user/nesca/nesca взят из вашего Dockerfile
+        docker cp nesca-container:/home/user/nesca/nesca ./nesca
+        # Удаляем временный контейнер
+        docker rm nesca-container
+
+    - name: Upload nesca binary as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nesca-binary
+        path: ./nesca
+        retention-days: 7
