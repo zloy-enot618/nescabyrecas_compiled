@@ -8,9 +8,13 @@ ENV QT_PATH /opt/Qt
 ENV QT_DESKTOP $QT_PATH/5.4/gcc_64
 ENV PATH $QT_DESKTOP/bin:$PATH
 
-# [ИСПРАВЛЕНИЕ 1] Переключаем репозитории на архивные (для Ubuntu 14.04)
+# [ИСПРАВЛЕНИЕ 1] Отключаем IPv6 для apt (часто вызывает зависания на старых зеркалах)
+RUN echo "Acquire::ForceIPv4 \"true\";" > /etc/apt/apt.conf.d/99force-ipv4
+
+# [ИСПРАВЛЕНИЕ 2] Переключаем репозитории на архивные (для Ubuntu 14.04)
 RUN sed -i -e 's/archive.ubuntu.com\|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
-# [ИСПРАВЛЕНИЕ 2] Раскомментируем строки deb-src, чтобы работал build-dep
+
+# [ИСПРАВЛЕНИЕ 3] Раскомментируем строки deb-src, чтобы работал build-dep
 RUN sed -i -e 's/^# deb-src /deb-src /' /etc/apt/sources.list
 
 # Install updates & requirements:
@@ -18,7 +22,8 @@ RUN sed -i -e 's/^# deb-src /deb-src /' /etc/apt/sources.list
 #  * curl, p7zip - to download & unpack Qt bundle
 #  * build-essential, pkg-config, libgl1-mesa-dev - basic Qt build requirements
 #  * libsm6, libice6, libxext6, libxrender1, libfontconfig1 - dependencies of Qt bundle run-file
-RUN apt-get -qq update && apt-get -qq dist-upgrade && apt-get install -qq -y --no-install-recommends \
+# [ИСПРАВЛЕНИЕ 4] Убран dist-upgrade и флаг -qq, чтобы видеть процесс и не тратить время впустую
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
     make \
@@ -35,10 +40,11 @@ RUN apt-get -qq update && apt-get -qq dist-upgrade && apt-get install -qq -y --n
     libxext6 \
     libxrender1 \
     libfontconfig1 \
-    && apt-get -qq clean
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Update curl
-# [ИСПРАВЛЕНИЕ 3] Добавлен apt-get update перед build-dep и обновлена ссылка на curl.se
+# [ИСПРАВЛЕНИЕ 5] Добавлен apt-get update перед build-dep и обновлена ссылка на curl.se
 RUN apt-get -qq update \
     && apt-get -qq build-dep -y curl \
     && wget https://curl.se/download/curl-7.50.2.tar.bz2 \
