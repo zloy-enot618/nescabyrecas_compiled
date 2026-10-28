@@ -8,6 +8,11 @@ ENV QT_PATH /opt/Qt
 ENV QT_DESKTOP $QT_PATH/5.4/gcc_64
 ENV PATH $QT_DESKTOP/bin:$PATH
 
+# [ИСПРАВЛЕНИЕ 1] Переключаем репозитории на архивные (для Ubuntu 14.04)
+RUN sed -i -e 's/archive.ubuntu.com\|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
+# [ИСПРАВЛЕНИЕ 2] Раскомментируем строки deb-src, чтобы работал build-dep
+RUN sed -i -e 's/^# deb-src /deb-src /' /etc/apt/sources.list
+
 # Install updates & requirements:
 #  * git, openssh-client, ca-certificates - clone & build
 #  * curl, p7zip - to download & unpack Qt bundle
@@ -33,8 +38,10 @@ RUN apt-get -qq update && apt-get -qq dist-upgrade && apt-get install -qq -y --n
     && apt-get -qq clean
 
 # Update curl
-RUN apt-get -qq build-dep -y curl \
-    && wget http://curl.haxx.se/download/curl-7.50.2.tar.bz2 \
+# [ИСПРАВЛЕНИЕ 3] Добавлен apt-get update перед build-dep и обновлена ссылка на curl.se
+RUN apt-get -qq update \
+    && apt-get -qq build-dep -y curl \
+    && wget https://curl.se/download/curl-7.50.2.tar.bz2 \
     && tar -xvjf curl-7.50.2.tar.bz2 \
     && cd curl-7.50.2 \
     && ./configure \
