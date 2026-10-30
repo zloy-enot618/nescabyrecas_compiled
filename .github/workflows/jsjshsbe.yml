@@ -1,0 +1,54 @@
+name: Build with MinGW (Windows)
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 1. Установка Qt5 и сопутствующего MinGW (версии 8.1.0)
+    - name: Install Qt and MinGW
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '5.15.2'
+        host: 'windows'
+        target: 'desktop'
+        arch: 'win64_mingw81'
+        install-deps: 'true'
+
+    # 2. Установка зависимостей libssh и openssl через vcpkg для MinGW
+    - name: Install dependencies via vcpkg
+      run: |
+        vcpkg triplet-overlay
+        vcpkg install libssh openssl --triplet=x64-mingw-dynamic
+
+    # 3. Настройка переменных окружения для qmake, чтобы он «увидел» библиотеки
+    # Передаем пути к инклудам и либам напрямую в qmake через параметры
+    - name: Run qmake
+      shell: cmd
+      run: |
+        qmake nesca.pro INCLUDEPATH+="${{ github.workspace }}\vcpkg_installed\x64-mingw-dynamic\include" LIBS+="-L\"${{ github.workspace }}\vcpkg_installed\x64-mingw-dynamic\lib\" -lssh -lssl -lcrypto"
+
+    # 4. Компиляция проекта с помощью mingw32-make
+    - name: Build project
+      shell: cmd
+      run: |
+        mingw32-make -j2
+
+    # 5. Сборка артефактов (собираем exe файл)
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nesca-windows-mingw
+        path: |
+          *.exe
+          release/*.exe
