@@ -25,12 +25,8 @@ jobs:
         arch: 'win64_mingw81'
         install-deps: 'true'
 
-    # 2. Установка зависимостей libssh и openssl через vcpkg для MinGW
-    - name: Install dependencies via vcpkg
-      run: |
-        vcpkg triplet-overlay
-        vcpkg install libssh openssl --triplet=x64-mingw-dynamic
-
+    
+    
     # 3. Настройка переменных окружения для qmake, чтобы он «увидел» библиотеки
     # Передаем пути к инклудам и либам напрямую в qmake через параметры
     - name: Run qmake
