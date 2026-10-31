@@ -1,4 +1,4 @@
-name: Build NESCA (Pure MSYS2)
+name: Build NESCA (Windows)
 
 on:
   push:
@@ -15,8 +15,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. Устанавливаем всё необходимое ИСКЛЮЧИТЕЛЬНО через MSYS2
-      - name: Setup MSYS2 and install dependencies
+      # 1. Настраиваем MSYS2. Ключевой момент: мы НЕ используем path-type: inherit!
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -29,38 +29,36 @@ jobs:
             mingw-w64-x86_64-libssh
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-curl
-          path-type: inherit
 
-      # 2. Сборка. Вызываем qmake и make по АБСОЛЮТНЫМ путям, чтобы не было конфликтов.
+      # 2. Сборка проекта
       - name: Build project
         shell: msys2 {0}
         run: |
-          export PATH="/mingw64/bin:$PATH"
+          # В окружении msys2 {0} путь /mingw64/bin уже должен быть в PATH
+          echo "=== Проверка qmake ==="
+          which qmake-qt5 || which qmake
           
-          # Проверяем, что curl на месте (на случай проблем с pacman)
-          if [ ! -f "/mingw64/include/curl/curl.h" ]; then
-            echo "ОШИБКА: curl/curl.h не найден! Вывод папки include:"
-            ls /mingw64/include
-            exit 1
+          # В MSYS2 утилита Qt5 обычно называется qmake-qt5
+          if command -v qmake-qt5 &> /dev/null; then
+            qmake-qt5 nesca.pro
+          else
+            qmake nesca.pro
           fi
           
-          # Вызываем MSYS2-шный qmake и make напрямую
-          /mingw64/bin/qmake nesca.pro
-          /mingw64/bin/mingw32-make -j2
+          mingw32-make -j2
 
-      # 3. Сбор DLL
-      - name: Collect DLLs and build artifact
+      # 3. Сбор готового архива с DLL
+      - name: Collect DLLs
         shell: msys2 {0}
         run: |
-          export PATH="/mingw64/bin:$PATH"
           mkdir -p dist
-          
+          # Находим скомпилированный exe
           if [ -f release/nesca.exe ]; then cp release/nesca.exe dist/; else cp nesca.exe dist/; fi
           
-          # windeployqt соберет все Qt-шные DLL
-          /mingw64/bin/windeployqt dist/nesca.exe || true
+          # Собираем Qt-библиотеки
+          windeployqt dist/nesca.exe
           
-          # Копируем зависимости сканера
+          # Копируем сторонние библиотеки из MSYS2
           cp /mingw64/bin/libssh.dll dist/ || true
           cp /mingw64/bin/libssl-*.dll dist/ || true
           cp /mingw64/bin/libcrypto-*.dll dist/ || true
@@ -69,16 +67,16 @@ jobs:
           cp /mingw64/bin/libzstd.dll dist/ || true
           cp /mingw64/bin/libbrotli*.dll dist/ || true
           
-          # Системные библиотеки
+          # Системные библиотеки MinGW
           cp /mingw64/bin/libgcc_s_seh-1.dll dist/ || true
           cp /mingw64/bin/libstdc++-6.dll dist/ || true
           cp /mingw64/bin/libwinpthread-1.dll dist/ || true
           
-          echo "=== Содержимое dist ==="
+          echo "=== Содержимое папки dist ==="
           ls -la dist
 
-      # 4. Загрузка
-      - name: Upload Build Artifact
+      # 4. Загрузка артефакта
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: nesca-windows
