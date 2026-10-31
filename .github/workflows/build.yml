@@ -1,0 +1,71 @@
+name: Build NESCA (Windows)
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Устанавливаем всё через MSYS2 (без path-type: inherit!)
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-qt5
+            mingw-w64-x86_64-qt5-multimedia
+            mingw-w64-x86_64-libssh
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-curl
+
+      # Сборка внутри MSYS2 (пути C:\msys64 больше не нужны)
+      - name: Build project
+        shell: msys2 {0}
+        run: |
+          if command -v qmake-qt5 &> /dev/null; then
+            qmake-qt5 nesca.pro
+          else
+            qmake nesca.pro
+          fi
+          mingw32-make -j2
+
+      # Сбор DLL
+      - name: Collect DLLs
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist
+          if [ -f release/nesca.exe ]; then cp release/nesca.exe dist/; else cp nesca.exe dist/; fi
+          
+          windeployqt dist/nesca.exe || true
+          
+          cp /mingw64/bin/libssh.dll dist/ || true
+          cp /mingw64/bin/libssl-*.dll dist/ || true
+          cp /mingw64/bin/libcrypto-*.dll dist/ || true
+          cp /mingw64/bin/libcurl.dll dist/ || true
+          cp /mingw64/bin/zlib1.dll dist/ || true
+          cp /mingw64/bin/libzstd.dll dist/ || true
+          cp /mingw64/bin/libbrotli*.dll dist/ || true
+          cp /mingw64/bin/libgcc_s_seh-1.dll dist/ || true
+          cp /mingw64/bin/libstdc++-6.dll dist/ || true
+          cp /mingw64/bin/libwinpthread-1.dll dist/ || true
+          
+          ls -la dist
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nesca-windows
+          path: dist/
+          if-no-files-found: error
