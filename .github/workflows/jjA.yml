@@ -1,0 +1,79 @@
+name: Build NESCA for Windows
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch: # Позволяет запускать сборку вручную
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. Установка Qt 5.15.2 с MinGW 8.1.0
+      - name: Install Qt and MinGW
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_mingw81'
+          install-deps: 'true'
+
+      # 2. Установка MSYS2 и библиотек libssh, openssl, curl для MinGW
+      - name: Setup MSYS2 and install dependencies
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-libssh
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-curl
+          path-type: inherit
+
+      # 3. Проверка, что заголовочный файл libssh на месте
+      - name: Verify libssh headers
+        shell: cmd
+        run: |
+          if not exist "C:\msys64\mingw64\include\libssh\libssh.h" (
+            echo "libssh headers NOT found. Exiting."
+            exit 1
+          ) else (
+            echo "libssh headers found."
+          )
+
+      # 4. Настройка qmake с путями к библиотекам MSYS2
+      - name: Run qmake
+        shell: cmd
+        run: |
+          qmake nesca.pro INCLUDEPATH+="C:\msys64\mingw64\include" LIBS+="-L\"C:\msys64\mingw64\lib\" -lssh -lssl -lcrypto -lcurl"
+
+      # 5. Компиляция
+      - name: Build project
+        shell: cmd
+        run: |
+          mingw32-make -j2
+
+      # 6. Сбор необходимых DLL для запуска
+      - name: Collect DLLs and build artifact
+        shell: cmd
+        run: |
+          mkdir dist
+          copy release\nesca.exe dist\ 2>nul || copy nesca.exe dist\ 2>nul
+          copy C:\msys64\mingw64\bin\libssh.dll dist\ 2>nul
+          copy C:\msys64\mingw64\bin\libssl-*.dll dist\ 2>nul
+          copy C:\msys64\mingw64\bin\libcrypto-*.dll dist\ 2>nul
+          copy C:\msys64\mingw64\bin\libcurl.dll dist\ 2>nul
+          echo "DLLs copied."
+
+      # 7. Загрузка артефакта
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nesca-windows
+          path: dist\
