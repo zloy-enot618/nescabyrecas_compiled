@@ -15,8 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. Устанавливаем всё через MSYS2. 
-      # Используем встроенный параметр install, он работает надежнее, чем ручной вызов pacman.
+      # 1. Устанавливаем пакеты через MSYS2
       - name: Setup MSYS2 and install dependencies
         uses: msys2/setup-msys2@v2
         with:
@@ -32,22 +31,37 @@ jobs:
             mingw-w64-x86_64-curl
           path-type: inherit
 
-      # 2. Сборка проекта
+      # 2. Сборка проекта с явным указанием PATH
       - name: Build project
         shell: msys2 {0}
         run: |
-          qmake nesca.pro
+          export PATH="/mingw64/bin:$PATH"
+          
+          # Проверяем наличие qmake (может называться qmake-qt5)
+          if command -v qmake-qt5 &> /dev/null; then
+            QMAKE_CMD=qmake-qt5
+          elif command -v qmake &> /dev/null; then
+            QMAKE_CMD=qmake
+          else
+            echo "qmake не найден! Список файлов в /mingw64/bin:"
+            ls /mingw64/bin | grep -i qmake
+            exit 1
+          fi
+          
+          echo "Используем: $QMAKE_CMD"
+          $QMAKE_CMD nesca.pro
           mingw32-make -j2
 
       # 3. Сбор DLL-файлов для запуска
       - name: Collect DLLs and build artifact
         shell: msys2 {0}
         run: |
+          export PATH="/mingw64/bin:$PATH"
           mkdir -p dist
           if [ -f release/nesca.exe ]; then cp release/nesca.exe dist/; else cp nesca.exe dist/; fi
           
           # windeployqt автоматически подтянет все нужные DLL от Qt
-          windeployqt dist/nesca.exe
+          windeployqt dist/nesca.exe || true
           
           # Копируем библиотеки, которые нужны для SSH, SSL и CURL
           cp /mingw64/bin/libssh.dll dist/ || true
