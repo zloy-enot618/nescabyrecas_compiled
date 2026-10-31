@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Устанавливаем всё через MSYS2 (без path-type: inherit!)
+      # Устанавливаем всё через MSYS2
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -30,10 +30,19 @@ jobs:
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-curl
 
-      # Сборка внутри MSYS2 (пути C:\msys64 больше не нужны)
+      # Сборка с автоматическим исправлением ошибок в коде
       - name: Build project
         shell: msys2 {0}
         run: |
+          # 1. Фиксим ошибку 'pow was not declared' (добавляем <cmath> в начало MainStarter.cpp)
+          sed -i '1i #include <cmath>' MainStarter.cpp
+          
+          # 2. Фиксим отсутствие iphlpapi (MinGW игнорирует #pragma comment из Windows)
+          if ! grep -q "iphlpapi" nesca.pro; then
+            echo 'LIBS += -liphlpapi' >> nesca.pro
+          fi
+          
+          # 3. Запускаем сборку
           if command -v qmake-qt5 &> /dev/null; then
             qmake-qt5 nesca.pro
           else
