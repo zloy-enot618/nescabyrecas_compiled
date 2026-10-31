@@ -15,7 +15,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Устанавливаем всё через MSYS2
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -30,19 +29,19 @@ jobs:
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-curl
 
-      # Сборка с автоматическим исправлением ошибок в коде
       - name: Build project
         shell: msys2 {0}
         run: |
-          # 1. Фиксим ошибку 'pow was not declared' (добавляем <cmath> в начало MainStarter.cpp)
-          sed -i '1i #include <cmath>' MainStarter.cpp
+          # 1. АВТО-ПАТЧ: Вставляем #include <cmath> во ВСЕ .cpp файлы
+          # Это разом исправит ошибки с pow(), log() и другими мат. функциями
+          find . -name "*.cpp" -exec sed -i '1i #include <cmath>' {} +
           
-          # 2. Фиксим отсутствие iphlpapi (MinGW игнорирует #pragma comment из Windows)
+          # 2. Добавляем системную библиотеку iphlpapi в проект (MinGW её теряет)
           if ! grep -q "iphlpapi" nesca.pro; then
             echo 'LIBS += -liphlpapi' >> nesca.pro
           fi
           
-          # 3. Запускаем сборку
+          # 3. Сборка
           if command -v qmake-qt5 &> /dev/null; then
             qmake-qt5 nesca.pro
           else
@@ -50,15 +49,16 @@ jobs:
           fi
           mingw32-make -j2
 
-      # Сбор DLL
       - name: Collect DLLs
         shell: msys2 {0}
         run: |
           mkdir -p dist
           if [ -f release/nesca.exe ]; then cp release/nesca.exe dist/; else cp nesca.exe dist/; fi
           
+          # Собираем Qt-библиотеки
           windeployqt dist/nesca.exe || true
           
+          # Копируем всё необходимое из MSYS2
           cp /mingw64/bin/libssh.dll dist/ || true
           cp /mingw64/bin/libssl-*.dll dist/ || true
           cp /mingw64/bin/libcrypto-*.dll dist/ || true
@@ -70,6 +70,7 @@ jobs:
           cp /mingw64/bin/libstdc++-6.dll dist/ || true
           cp /mingw64/bin/libwinpthread-1.dll dist/ || true
           
+          echo "=== Готовый архив ==="
           ls -la dist
 
       - name: Upload Artifact
