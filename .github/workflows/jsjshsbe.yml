@@ -12,39 +12,48 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # 1. Установка Qt5 и сопутствующего MinGW (версии 8.1.0)
-    - name: Install Qt and MinGW
-      uses: jurplel/install-qt-action@v3
-      with:
-        version: '5.15.2'
-        host: 'windows'
-        target: 'desktop'
-        arch: 'win64_mingw81'
-        install-deps: 'true'
+      # 1. Установка Qt 5.15.2 и MinGW 8.1.0
+      - name: Install Qt and MinGW
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_mingw81'
+          install-deps: 'true'
 
-    
-    
-    # 3. Настройка переменных окружения для qmake, чтобы он «увидел» библиотеки
-    # Передаем пути к инклудам и либам напрямую в qmake через параметры
-    - name: Run qmake
-      shell: cmd
-      run: |
-        qmake nesca.pro INCLUDEPATH+="${{ github.workspace }}\vcpkg_installed\x64-mingw-dynamic\include" LIBS+="-L\"${{ github.workspace }}\vcpkg_installed\x64-mingw-dynamic\lib\" -lssh -lssl -lcrypto"
+      # 2. Установка MSYS2 и библиотек libssh, openssl, curl для MinGW
+      - name: Setup MSYS2 and install dependencies
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-libssh
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-curl
+          path-type: inherit
 
-    # 4. Компиляция проекта с помощью mingw32-make
-    - name: Build project
-      shell: cmd
-      run: |
-        mingw32-make -j2
+      # 3. Настройка qmake с путями к библиотекам из MSYS2
+      - name: Run qmake
+        shell: cmd
+        run: |
+          qmake nesca.pro INCLUDEPATH+="C:\msys64\mingw64\include" LIBS+="-L\"C:\msys64\mingw64\lib\" -lssh -lssl -lcrypto -lcurl"
 
-    # 5. Сборка артефактов (собираем exe файл)
-    - name: Upload Build Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: nesca-windows-mingw
-        path: |
-          *.exe
-          release/*.exe
+      # 4. Компиляция
+      - name: Build project
+        shell: cmd
+        run: |
+          mingw32-make -j2
+
+      # 5. Загрузка артефакта
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nesca-windows-mingw
+          path: |
+            *.exe
+            release/*.exe
