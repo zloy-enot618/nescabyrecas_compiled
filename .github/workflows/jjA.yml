@@ -1,4 +1,4 @@
-name: Build NESCA for Windows
+name: Build NESCA for Windows (Pure MSYS2)
 
 on:
   push:
@@ -15,81 +15,61 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. Установка Qt 5.15.2 с MinGW 8.1.0
-      - name: Install Qt and MinGW
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '5.15.2'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_mingw81'
-          install-deps: 'true'
-
-      # 2. Установка MSYS2 (без списка install, чтобы избежать проблем с окружением)
-      - name: Setup MSYS2
+      # 1. Устанавливаем всё через MSYS2. 
+      # Используем встроенный параметр install, он работает надежнее, чем ручной вызов pacman.
+      - name: Setup MSYS2 and install dependencies
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-qt5
+            mingw-w64-x86_64-qt5-multimedia
+            mingw-w64-x86_64-libssh
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-curl
           path-type: inherit
 
-      # 3. Явная установка зависимостей через pacman в mingw64
-      - name: Install dependencies via pacman
+      # 2. Сборка проекта
+      - name: Build project
         shell: msys2 {0}
         run: |
-          pacman -S --noconfirm --needed \
-            mingw-w64-x86_64-libssh \
-            mingw-w64-x86_64-openssl \
-            mingw-w64-x86_64-curl
-
-      # 4. Проверка наличия заголовков libssh
-      - name: Verify libssh headers
-        shell: cmd
-        run: |
-          if not exist "C:\msys64\mingw64\include\libssh\libssh.h" (
-            echo "libssh.h NOT found. Listing C:\msys64\mingw64\include:"
-            dir C:\msys64\mingw64\include
-            echo "Listing C:\msys64\mingw64\include\libssh (if exists):"
-            dir C:\msys64\mingw64\include\libssh 2>nul
-            exit 1
-          ) else (
-            echo "libssh.h found at C:\msys64\mingw64\include\libssh\libssh.h"
-          )
-
-      # 5. Настройка qmake с путями к библиотекам MSYS2
-      - name: Run qmake
-        shell: cmd
-        run: |
-          set PATH=C:\msys64\mingw64\bin;%PATH%
-          qmake nesca.pro INCLUDEPATH+="C:\msys64\mingw64\include" LIBS+="-L\"C:\msys64\mingw64\lib\" -lssh -lssl -lcrypto -lcurl"
-
-      # 6. Компиляция
-      - name: Build project
-        shell: cmd
-        run: |
-          set PATH=C:\msys64\mingw64\bin;%PATH%
+          qmake nesca.pro
           mingw32-make -j2
 
-      # 7. Сбор готового пакета (exe + нужные DLL)
+      # 3. Сбор DLL-файлов для запуска
       - name: Collect DLLs and build artifact
-        shell: cmd
+        shell: msys2 {0}
         run: |
-          mkdir dist
-          if exist release\nesca.exe (copy release\nesca.exe dist\) else (copy nesca.exe dist\)
-          copy C:\msys64\mingw64\bin\libssh.dll dist\ 2>nul
-          copy C:\msys64\mingw64\bin\libssl-*.dll dist\ 2>nul
-          copy C:\msys64\mingw64\bin\libcrypto-*.dll dist\ 2>nul
-          copy C:\msys64\mingw64\bin\libcurl.dll dist\ 2>nul
-          copy C:\msys64\mingw64\bin\libzstd.dll dist\ 2>nul
-          copy C:\msys64\mingw64\bin\libbrotlidec.dll dist\ 2>nul
-          copy C:\msys64\mingw64\bin\libbrotlicommon.dll dist\ 2>nul
-          echo "Contents of dist:"
-          dir dist
+          mkdir -p dist
+          if [ -f release/nesca.exe ]; then cp release/nesca.exe dist/; else cp nesca.exe dist/; fi
+          
+          # windeployqt автоматически подтянет все нужные DLL от Qt
+          windeployqt dist/nesca.exe
+          
+          # Копируем библиотеки, которые нужны для SSH, SSL и CURL
+          cp /mingw64/bin/libssh.dll dist/ || true
+          cp /mingw64/bin/libssl-*.dll dist/ || true
+          cp /mingw64/bin/libcrypto-*.dll dist/ || true
+          cp /mingw64/bin/libcurl.dll dist/ || true
+          cp /mingw64/bin/zlib1.dll dist/ || true
+          cp /mingw64/bin/libzstd.dll dist/ || true
+          cp /mingw64/bin/libbrotli*.dll dist/ || true
+          
+          # Копируем системные библиотеки MinGW
+          cp /mingw64/bin/libgcc_s_seh-1.dll dist/ || true
+          cp /mingw64/bin/libstdc++-6.dll dist/ || true
+          cp /mingw64/bin/libwinpthread-1.dll dist/ || true
+          
+          echo "=== Содержимое папки dist ==="
+          ls -la dist
 
-      # 8. Загрузка артефакта
+      # 4. Загрузка артефакта
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: nesca-windows
-          path: dist\
+          path: dist/
           if-no-files-found: error
