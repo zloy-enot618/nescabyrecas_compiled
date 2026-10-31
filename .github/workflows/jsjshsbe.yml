@@ -1,4 +1,4 @@
-name: Build with MinGW (Windows)
+name: Build NESCA (Pure MSYS2)
 
 on:
   push:
@@ -15,57 +15,72 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. Установка Qt 5.15.2 и MinGW 8.1.0
-      - name: Install Qt and MinGW
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '5.15.2'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_mingw81'
-          install-deps: 'true'
-
-      # 2. Установка MSYS2 и библиотек
+      # 1. Устанавливаем всё необходимое ИСКЛЮЧИТЕЛЬНО через MSYS2
       - name: Setup MSYS2 and install dependencies
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-qt5
+            mingw-w64-x86_64-qt5-multimedia
             mingw-w64-x86_64-libssh
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-curl
           path-type: inherit
 
-      # 3. Явная проверка наличия заголовочного файла libssh
-      - name: Verify libssh headers are present
-        shell: cmd
-        run: |
-          if not exist "C:\msys64\mingw64\include\libssh\libssh.h" (
-            echo "libssh headers NOT found. Installing explicitly via pacman..."
-            C:\msys64\usr\bin\pacman -S --noconfirm mingw-w64-x86_64-libssh
-          ) else (
-            echo "libssh headers found."
-          )
-          dir C:\msys64\mingw64\include\libssh\libssh.h
-
-      # 4. Настройка qmake с путями к библиотекам из MSYS2
-      - name: Run qmake
-        shell: cmd
-        run: |
-          qmake nesca.pro INCLUDEPATH+="C:\msys64\mingw64\include" LIBS+="-L\"C:\msys64\mingw64\lib\" -lssh -lssl -lcrypto -lcurl"
-
-      # 5. Компиляция
+      # 2. Сборка. Вызываем qmake и make по АБСОЛЮТНЫМ путям, чтобы не было конфликтов.
       - name: Build project
-        shell: cmd
+        shell: msys2 {0}
         run: |
-          mingw32-make -j2
+          export PATH="/mingw64/bin:$PATH"
+          
+          # Проверяем, что curl на месте (на случай проблем с pacman)
+          if [ ! -f "/mingw64/include/curl/curl.h" ]; then
+            echo "ОШИБКА: curl/curl.h не найден! Вывод папки include:"
+            ls /mingw64/include
+            exit 1
+          fi
+          
+          # Вызываем MSYS2-шный qmake и make напрямую
+          /mingw64/bin/qmake nesca.pro
+          /mingw64/bin/mingw32-make -j2
 
-      # 6. Загрузка артефакта
+      # 3. Сбор DLL
+      - name: Collect DLLs and build artifact
+        shell: msys2 {0}
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          mkdir -p dist
+          
+          if [ -f release/nesca.exe ]; then cp release/nesca.exe dist/; else cp nesca.exe dist/; fi
+          
+          # windeployqt соберет все Qt-шные DLL
+          /mingw64/bin/windeployqt dist/nesca.exe || true
+          
+          # Копируем зависимости сканера
+          cp /mingw64/bin/libssh.dll dist/ || true
+          cp /mingw64/bin/libssl-*.dll dist/ || true
+          cp /mingw64/bin/libcrypto-*.dll dist/ || true
+          cp /mingw64/bin/libcurl.dll dist/ || true
+          cp /mingw64/bin/zlib1.dll dist/ || true
+          cp /mingw64/bin/libzstd.dll dist/ || true
+          cp /mingw64/bin/libbrotli*.dll dist/ || true
+          
+          # Системные библиотеки
+          cp /mingw64/bin/libgcc_s_seh-1.dll dist/ || true
+          cp /mingw64/bin/libstdc++-6.dll dist/ || true
+          cp /mingw64/bin/libwinpthread-1.dll dist/ || true
+          
+          echo "=== Содержимое dist ==="
+          ls -la dist
+
+      # 4. Загрузка
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nesca-windows-mingw
-          path: |
-            *.exe
-            release/*.exe
+          name: nesca-windows
+          path: dist/
+          if-no-files-found: error
