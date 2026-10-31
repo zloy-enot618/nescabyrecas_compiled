@@ -25,7 +25,7 @@ jobs:
           arch: 'win64_mingw81'
           install-deps: 'true'
 
-      # 2. Установка MSYS2 и библиотек libssh, openssl, curl для MinGW
+      # 2. Установка MSYS2 и библиотек
       - name: Setup MSYS2 and install dependencies
         uses: msys2/setup-msys2@v2
         with:
@@ -37,19 +37,31 @@ jobs:
             mingw-w64-x86_64-curl
           path-type: inherit
 
-      # 3. Настройка qmake с путями к библиотекам из MSYS2
+      # 3. Явная проверка наличия заголовочного файла libssh
+      - name: Verify libssh headers are present
+        shell: cmd
+        run: |
+          if not exist "C:\msys64\mingw64\include\libssh\libssh.h" (
+            echo "libssh headers NOT found. Installing explicitly via pacman..."
+            C:\msys64\usr\bin\pacman -S --noconfirm mingw-w64-x86_64-libssh
+          ) else (
+            echo "libssh headers found."
+          )
+          dir C:\msys64\mingw64\include\libssh\libssh.h
+
+      # 4. Настройка qmake с путями к библиотекам из MSYS2
       - name: Run qmake
         shell: cmd
         run: |
           qmake nesca.pro INCLUDEPATH+="C:\msys64\mingw64\include" LIBS+="-L\"C:\msys64\mingw64\lib\" -lssh -lssl -lcrypto -lcurl"
 
-      # 4. Компиляция
+      # 5. Компиляция
       - name: Build project
         shell: cmd
         run: |
           mingw32-make -j2
 
-      # 5. Загрузка артефакта
+      # 6. Загрузка артефакта
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
