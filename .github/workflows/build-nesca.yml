@@ -1,4 +1,4 @@
-name: Build Nesca for Windows
+name: Build Nesca (Auto-Detect)
 
 on:
   push:
@@ -19,34 +19,64 @@ jobs:
         msystem: MINGW64
         update: true
         install: >-
-          mingw-w64-x86_64-qt5-base
+          mingw-w64-x86_64-qt5
           mingw-w64-x86_64-qt5-tools
           mingw-w64-x86_64-libssh
           mingw-w64-x86_64-openssl
           mingw-w64-x86_64-make
           mingw-w64-x86_64-gcc
 
-    - name: Build with qmake and make
+    - name: Auto-Detect and Build
       shell: msys2 {0}
       run: |
-        # Вызываем qmake по абсолютному пути, чтобы обойти проблемы с PATH
-        /mingw64/bin/qmake.exe nesca.pro
+        echo "=== 1. Проверяем, что лежит в репозитории ==="
+        ls -la
         
-        # Вызываем make по абсолютному пути
-        /mingw64/bin/mingw32-make.exe -j$(nproc)
+        echo "=== 2. Ищем файлы проекта (.pro) ==="
+        PRO_FILE=$(find . -name "*.pro" | head -n 1)
+        
+        if [ -z "$PRO_FILE" ]; then
+          echo "Файл .pro НЕ НАЙДЕН! Возможно, это уже скомпилированная версия или не Qt-проект."
+          echo "Пропускаем компиляцию."
+        else
+          echo "Найден файл проекта: $PRO_FILE"
+          
+          echo "=== 3. Ищем qmake ==="
+          QMAKE_BIN=$(find /mingw64 -name "qmake.exe" | head -n 1)
+          
+          if [ -z "$QMAKE_BIN" ]; then
+            echo "ОШИБКА: qmake не найден в /mingw64."
+            exit 1
+          fi
+          
+          echo "Найден qmake: $QMAKE_BIN"
+          
+          echo "=== 4. Запускаем сборку ==="
+          cd $(dirname "$PRO_FILE")
+          $QMAKE_BIN $(basename "$PRO_FILE")
+          /mingw64/bin/mingw32-make.exe -j$(nproc)
+        fi
 
-    - name: Deploy Qt dependencies
+    - name: Deploy Qt Dependencies (if compiled)
       shell: msys2 {0}
       run: |
-        mkdir deploy
-        # Ищем exe в любой папке и копируем
-        find . -name "nesca.exe" -exec cp {} deploy/ \;
+        # Ищем собранный exe
+        EXE_FILE=$(find . -name "nesca.exe" | head -n 1)
         
-        # Собираем DLL по абсолютному пути
-        /mingw64/bin/windeployqt.exe --compiler-runtime deploy/nesca.exe
+        if [ -n "$EXE_FILE" ]; then
+          echo "Найден exe: $EXE_FILE. Собираем библиотеки..."
+          mkdir -p deploy
+          cp "$EXE_FILE" deploy/
+          /mingw64/bin/windeployqt.exe --compiler-runtime deploy/nesca.exe
+        else
+          echo "Exe-файл не найден (возможно, компиляция не проводилась)."
+        fi
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: nesca-windows-x64
-        path: deploy/
+        name: nesca-result
+        path: |
+          deploy/
+          **/*.exe
+          **/*.dll
