@@ -5,7 +5,7 @@ on:
     branches: [ master, main ]
   pull_request:
     branches: [ master, main ]
-  workflow_dispatch: # Позволяет запускать сборку вручную из вкладки Actions
+  workflow_dispatch: # Позволяет запускать сборку вручную
 
 jobs:
   build:
@@ -30,15 +30,25 @@ jobs:
     - name: Build with qmake and make
       shell: msys2 {0}
       run: |
+        # Добавляем пути Qt и MinGW в PATH
+        export PATH="/mingw64/bin:$PATH"
+        
+        # Запускаем qmake (файл nesca.pro должен лежать в корне репозитория)
         qmake nesca.pro
-        make -j$(nproc)
+        
+        # Запускаем сборку. Используем mingw32-make для надежности
+        mingw32-make -j$(nproc)
 
     - name: Deploy Qt dependencies
       shell: msys2 {0}
       run: |
+        export PATH="/mingw64/bin:$PATH"
         mkdir deploy
-        cp release/nesca.exe deploy/
-        # Копируем все необходимые Qt DLL в папку deploy
+        
+        # Ищем собранный exe-файл в любой папке и копируем его в deploy
+        find . -name "nesca.exe" -exec cp {} deploy/ \;
+        
+        # Собираем все необходимые DLL библиотеки рядом с exe
         windeployqt.exe --compiler-runtime deploy/nesca.exe
 
     - name: Upload Artifact
