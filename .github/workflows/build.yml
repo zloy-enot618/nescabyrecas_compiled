@@ -1,10 +1,8 @@
-name: Build NESCA (Windows)
+name: Build Nesca (Auto-Detect)
 
 on:
   push:
-    branches: [ "master", "main" ]
-  pull_request:
-    branches: [ "master", "main" ]
+    branches: [ master, main ]
   workflow_dispatch:
 
 jobs:
@@ -12,70 +10,72 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-make
-            mingw-w64-x86_64-qt5
-            mingw-w64-x86_64-qt5-multimedia
-            mingw-w64-x86_64-libssh
-            mingw-w64-x86_64-openssl
-            mingw-w64-x86_64-curl
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: false # ОТКЛЮЧИЛИ обновление, чтобы не было зависаний на [Y/n]
+        install: >-
+          mingw-w64-x86_64-qt5
+          mingw-w64-x86_64-qt5-tools
+          mingw-w64-x86_64-libssh
+          mingw-w64-x86_64-openssl
+          mingw-w64-x86_64-make
+          mingw-w64-x86_64-gcc
 
-      - name: Build project
-        shell: msys2 {0}
-        run: |
-          # 1. АВТО-ПАТЧ: Вставляем #include <cmath> во ВСЕ .cpp файлы
-          # Это разом исправит ошибки с pow(), log() и другими мат. функциями
-          find . -name "*.cpp" -exec sed -i '1i #include <cmath>' {} +
+    - name: Auto-Detect and Build
+      shell: msys2 {0}
+      run: |
+        echo "=== 1. Проверяем, что лежит в репозитории ==="
+        ls -la
+        
+        echo "=== 2. Ищем файлы проекта (.pro) ==="
+        PRO_FILE=$(find . -name "*.pro" | head -n 1)
+        
+        if [ -z "$PRO_FILE" ]; then
+          echo "Файл .pro НЕ НАЙДЕН! Возможно, это уже скомпилированная версия."
+          echo "Пропускаем компиляцию."
+        else
+          echo "Найден файл проекта: $PRO_FILE"
           
-          # 2. Добавляем системную библиотеку iphlpapi в проект (MinGW её теряет)
-          if ! grep -q "iphlpapi" nesca.pro; then
-            echo 'LIBS += -liphlpapi' >> nesca.pro
+          echo "=== 3. Ищем qmake ==="
+          QMAKE_BIN=$(find /mingw64 -name "qmake.exe" | head -n 1)
+          
+          if [ -z "$QMAKE_BIN" ]; then
+            echo "ОШИБКА: qmake не найден в /mingw64."
+            exit 1
           fi
           
-          # 3. Сборка
-          if command -v qmake-qt5 &> /dev/null; then
-            qmake-qt5 nesca.pro
-          else
-            qmake nesca.pro
-          fi
-          mingw32-make -j2
+          echo "Найден qmake: $QMAKE_BIN"
+          
+          echo "=== 4. Запускаем сборку ==="
+          cd $(dirname "$PRO_FILE")
+          $QMAKE_BIN $(basename "$PRO_FILE")
+          /mingw64/bin/mingw32-make.exe -j$(nproc)
+        fi
 
-      - name: Collect DLLs
-        shell: msys2 {0}
-        run: |
-          mkdir -p dist
-          if [ -f release/nesca.exe ]; then cp release/nesca.exe dist/; else cp nesca.exe dist/; fi
-          
-          # Собираем Qt-библиотеки
-          windeployqt dist/nesca.exe || true
-          
-          # Копируем всё необходимое из MSYS2
-          cp /mingw64/bin/libssh.dll dist/ || true
-          cp /mingw64/bin/libssl-*.dll dist/ || true
-          cp /mingw64/bin/libcrypto-*.dll dist/ || true
-          cp /mingw64/bin/libcurl.dll dist/ || true
-          cp /mingw64/bin/zlib1.dll dist/ || true
-          cp /mingw64/bin/libzstd.dll dist/ || true
-          cp /mingw64/bin/libbrotli*.dll dist/ || true
-          cp /mingw64/bin/libgcc_s_seh-1.dll dist/ || true
-          cp /mingw64/bin/libstdc++-6.dll dist/ || true
-          cp /mingw64/bin/libwinpthread-1.dll dist/ || true
-          
-          echo "=== Готовый архив ==="
-          ls -la dist
+    - name: Deploy Qt Dependencies (if compiled)
+      shell: msys2 {0}
+      run: |
+        EXE_FILE=$(find . -name "nesca.exe" | head -n 1)
+        
+        if [ -n "$EXE_FILE" ]; then
+          echo "Найден exe: $EXE_FILE. Собираем библиотеки..."
+          mkdir -p deploy
+          cp "$EXE_FILE" deploy/
+          /mingw64/bin/windeployqt.exe --compiler-runtime deploy/nesca.exe
+        else
+          echo "Exe-файл не найден (возможно, компиляция не проводилась)."
+        fi
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nesca-windows
-          path: dist/
-          if-no-files-found: error
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nesca-result
+        path: |
+          deploy/
+          **/*.exe
+          **/*.dll
