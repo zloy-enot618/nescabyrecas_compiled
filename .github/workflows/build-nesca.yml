@@ -1,0 +1,48 @@
+name: Build Nesca for Windows
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch: # Позволяет запускать сборку вручную из вкладки Actions
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-qt5
+          mingw-w64-x86_64-libssh
+          mingw-w64-x86_64-openssl
+          mingw-w64-x86_64-make
+          mingw-w64-x86_64-gcc
+
+    - name: Build with qmake and make
+      shell: msys2 {0}
+      run: |
+        qmake nesca.pro
+        make -j$(nproc)
+
+    - name: Deploy Qt dependencies
+      shell: msys2 {0}
+      run: |
+        mkdir deploy
+        cp release/nesca.exe deploy/
+        # Копируем все необходимые Qt DLL в папку deploy
+        windeployqt.exe --compiler-runtime deploy/nesca.exe
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nesca-windows-x64
+        path: deploy/
