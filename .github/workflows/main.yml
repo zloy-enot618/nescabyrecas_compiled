@@ -28,22 +28,19 @@ jobs:
     - name: Fix qmake name and patch code
       shell: msys2 {0}
       run: |
-        # 1. Создаем ссылку qmake, если её нет (в UCRT64 файл может называться qmake-qt5.exe)
+        # Создаем ссылку qmake, если её нет
         if [ ! -f /ucrt64/bin/qmake.exe ]; then
           ln -s /ucrt64/bin/qmake-qt5.exe /ucrt64/bin/qmake.exe || true
         fi
         
-        # 2. Автоматически исправляем устаревший код
+        # Автоматически исправляем устаревший код
         find . -name "*.cpp" -o -name "*.h" | xargs sed -i 's/CURLINFO_LASTSOCKET/CURLINFO_ACTIVESOCKET/g' || true
-        echo "Окружение готово, код исправлен!"
 
     - name: Build project
       shell: msys2 {0}
       run: |
-        # Явно добавляем пути, чтобы система точно нашла инструменты
         export PATH="/ucrt64/bin:/usr/bin:$PATH"
         
-        # Ищем .pro файл и собираем
         if [ -f "nesca.pro" ]; then
           qmake nesca.pro
         elif [ -f "src/nesca.pro" ]; then
@@ -54,7 +51,9 @@ jobs:
           ls -R
           exit 1
         fi
-        make -j$(nproc)
+        
+        # ИСПОЛЬЗУЕМ mingw32-make ВМЕСТО make
+        mingw32-make -j$(nproc) || make -j$(nproc)
 
     - name: Package dependencies
       shell: msys2 {0}
