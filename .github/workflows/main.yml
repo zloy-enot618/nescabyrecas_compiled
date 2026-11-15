@@ -1,4 +1,4 @@
-name: Build Nesca (UCRT64)
+name: Build Nesca (Final)
 
 on:
   workflow_dispatch:
@@ -10,65 +10,37 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Ставим Qt (64-bit MinGW)
-    - name: Install Qt 5.15 (MinGW 64-bit)
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: '5.15.2'
-        arch: 'win64_mingw81'   # Используем 64-битную версию
-        cache: true
-
-    # 2. Ставим MSYS2 с современным окружением UCRT64
-    - name: Setup MSYS2 (UCRT64)
+    - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
         msystem: UCRT64
         update: true
         install: >-
           mingw-w64-ucrt-x86_64-toolchain
+          mingw-w64-ucrt-x86_64-qt5
           mingw-w64-ucrt-x86_64-libssh
-          mingw-w64-ucrt-x86_64-openssl
           mingw-w64-ucrt-x86_64-curl
-          pkg-config
-        # Подавляем предупреждение, если оно останется
-        suppress-deprecation-warnings: true
+          mingw-w64-ucrt-x86_64-openssl
+          mingw-w64-ucrt-x86_64-zlib
 
-    # 3. Сборка (добавили переменную окружения для корректной работы)
     - name: Build
       shell: msys2 {0}
-      env:
-        PYTHONUTF8: "1" # Помогает избежать проблем с кодировкой
       run: |
         qmake nesca.pro
         mingw32-make -j$(nproc)
 
-    # 4. Копирование Qt-библиотек (используем cmd, чтобы windeployqt работал нативно)
-    - name: Deploy Qt dependencies
-      shell: cmd
-      run: |
-        windeployqt.exe --release --compiler-runtime release\nesca.exe
-
-    # 5. Копирование системных DLL из MSYS2 (пути теперь ведут в /ucrt64/bin)
-    - name: Copy MinGW dependencies
+    - name: Collect DLLs and EXE
       shell: msys2 {0}
       run: |
-        cp /ucrt64/bin/libssh*.dll          release/ 2>/dev/null || true
-        cp /ucrt64/bin/libcurl*.dll         release/ 2>/dev/null || true
-        cp /ucrt64/bin/libssl*.dll          release/ 2>/dev/null || true
-        cp /ucrt64/bin/libcrypto*.dll       release/ 2>/dev/null || true
-        cp /ucrt64/bin/libsasl*.dll         release/ 2>/dev/null || true
-        cp /ucrt64/bin/libldap*.dll         release/ 2>/dev/null || true
-        cp /ucrt64/bin/liblber*.dll         release/ 2>/dev/null || true
-        cp /ucrt64/bin/zlib1.dll            release/ 2>/dev/null || true
+        mkdir -p final_build
+        cp release/nesca.exe final_build/ || cp nesca.exe final_build/
+        # Автоматически собираем все нужные DLL-ки
+        ldd final_build/nesca.exe | grep "ucrt64/bin" | awk '{print $3}' | xargs -I {} cp {} final_build/
+        # Копируем списки паролей
+        cp -r pwd_lists final_build/ || true
 
-    # 6. Копирование списков паролей (проверяем наличие папки)
-    - name: Copy password lists
-      shell: cmd
-      run: if exist "pwd_lists" xcopy /E /I /Y "pwd_lists" "release\pwd_lists"
-
-    # 7. Загружаем результат
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: nesca-ucrt64
-        path: release/
+        name: nesca-windows
+        path: final_build/
