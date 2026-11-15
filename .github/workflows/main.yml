@@ -1,4 +1,4 @@
-name: Build Nesca (full rebuild, MinGW)
+name: Build Nesca (UCRT64)
 
 on:
   workflow_dispatch:
@@ -10,57 +10,65 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Qt 5.15 (MinGW 32-bit)
+    # 1. Ставим Qt (64-bit MinGW)
+    - name: Install Qt 5.15 (MinGW 64-bit)
       uses: jurplel/install-qt-action@v4
       with:
         version: '5.15.2'
-        arch: 'win32_mingw81'
+        arch: 'win64_mingw81'   # Используем 64-битную версию
         cache: true
 
-    - name: Setup MSYS2 (MinGW32)
+    # 2. Ставим MSYS2 с современным окружением UCRT64
+    - name: Setup MSYS2 (UCRT64)
       uses: msys2/setup-msys2@v2
       with:
-        msystem: MINGW32
+        msystem: UCRT64
         update: true
         install: >-
-          mingw-w64-i686-toolchain
-          mingw-w64-i686-libssh
-          mingw-w64-i686-openssl
-          mingw-w64-i686-curl
-          mingw-w64-i686-libsasl
-          mingw-w64-i686-openldap
-          mingw-w64-i686-zlib
+          mingw-w64-ucrt-x86_64-toolchain
+          mingw-w64-ucrt-x86_64-libssh
+          mingw-w64-ucrt-x86_64-openssl
+          mingw-w64-ucrt-x86_64-curl
           pkg-config
+        # Подавляем предупреждение, если оно останется
+        suppress-deprecation-warnings: true
 
+    # 3. Сборка (добавили переменную окружения для корректной работы)
     - name: Build
       shell: msys2 {0}
+      env:
+        PYTHONUTF8: "1" # Помогает избежать проблем с кодировкой
       run: |
         qmake nesca.pro
         mingw32-make -j$(nproc)
 
-    - name: Deploy Qt + MinGW runtime
+    # 4. Копирование Qt-библиотек (используем cmd, чтобы windeployqt работал нативно)
+    - name: Deploy Qt dependencies
       shell: cmd
       run: |
         windeployqt.exe --release --compiler-runtime release\nesca.exe
 
-    - name: Copy MinGW dependencies (ssh, curl, ssl, sasl, ldap, zlib)
+    # 5. Копирование системных DLL из MSYS2 (пути теперь ведут в /ucrt64/bin)
+    - name: Copy MinGW dependencies
       shell: msys2 {0}
       run: |
-        cp /mingw32/bin/libssh*.dll          release/ 2>/dev/null || true
-        cp /mingw32/bin/libcurl*.dll         release/ 2>/dev/null || true
-        cp /mingw32/bin/libssl*.dll          release/ 2>/dev/null || true
-        cp /mingw32/bin/libcrypto*.dll       release/ 2>/dev/null || true
-        cp /mingw32/bin/libsasl*.dll         release/ 2>/dev/null || true
-        cp /mingw32/bin/libldap*.dll         release/ 2>/dev/null || true
-        cp /mingw32/bin/liblber*.dll         release/ 2>/dev/null || true
-        cp /mingw32/bin/zlib1.dll            release/ 2>/dev/null || true
+        cp /ucrt64/bin/libssh*.dll          release/ 2>/dev/null || true
+        cp /ucrt64/bin/libcurl*.dll         release/ 2>/dev/null || true
+        cp /ucrt64/bin/libssl*.dll          release/ 2>/dev/null || true
+        cp /ucrt64/bin/libcrypto*.dll       release/ 2>/dev/null || true
+        cp /ucrt64/bin/libsasl*.dll         release/ 2>/dev/null || true
+        cp /ucrt64/bin/libldap*.dll         release/ 2>/dev/null || true
+        cp /ucrt64/bin/liblber*.dll         release/ 2>/dev/null || true
+        cp /ucrt64/bin/zlib1.dll            release/ 2>/dev/null || true
 
+    # 6. Копирование списков паролей (проверяем наличие папки)
     - name: Copy password lists
       shell: cmd
       run: if exist "pwd_lists" xcopy /E /I /Y "pwd_lists" "release\pwd_lists"
 
+    # 7. Загружаем результат
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: nesca-mingw
+        name: nesca-ucrt64
         path: release/
