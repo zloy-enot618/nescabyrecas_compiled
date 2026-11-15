@@ -1,4 +1,4 @@
-name: Build Nesca (Final)
+name: Build Nesca (Windows)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,8 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
@@ -17,30 +18,79 @@ jobs:
         update: true
         install: >-
           mingw-w64-ucrt-x86_64-toolchain
-          mingw-w64-ucrt-x86_64-qt5
+          mingw-w64-ucrt-x86_64-qt5-base
+          mingw-w64-ucrt-x86_64-qt5-multimedia
           mingw-w64-ucrt-x86_64-libssh
           mingw-w64-ucrt-x86_64-curl
           mingw-w64-ucrt-x86_64-openssl
-          mingw-w64-ucrt-x86_64-zlib
+          zip
 
-    - name: Build
+    - name: Fix qmake name and patch code
       shell: msys2 {0}
       run: |
-        qmake nesca.pro
-        mingw32-make -j$(nproc)
+        # 1. Создаем ссылку qmake, если её нет (в UCRT64 файл может называться qmake-qt5.exe)
+        if [ ! -f /ucrt64/bin/qmake.exe ]; then
+          ln -s /ucrt64/bin/qmake-qt5.exe /ucrt64/bin/qmake.exe || true
+        fi
+        
+        # 2. Автоматически исправляем устаревший код
+        find . -name "*.cpp" -o -name "*.h" | xargs sed -i 's/CURLINFO_LASTSOCKET/CURLINFO_ACTIVESOCKET/g' || true
+        echo "Окружение готово, код исправлен!"
 
-    - name: Collect DLLs and EXE
+    - name: Build project
       shell: msys2 {0}
       run: |
-        mkdir -p final_build
-        cp release/nesca.exe final_build/ || cp nesca.exe final_build/
-        # Автоматически собираем все нужные DLL-ки
-        ldd final_build/nesca.exe | grep "ucrt64/bin" | awk '{print $3}' | xargs -I {} cp {} final_build/
+        # Явно добавляем пути, чтобы система точно нашла инструменты
+        export PATH="/ucrt64/bin:/usr/bin:$PATH"
+        
+        # Ищем .pro файл и собираем
+        if [ -f "nesca.pro" ]; then
+          qmake nesca.pro
+        elif [ -f "src/nesca.pro" ]; then
+          cd src
+          qmake nesca.pro
+        else
+          echo "Файл nesca.pro не найден!"
+          ls -R
+          exit 1
+        fi
+        make -j$(nproc)
+
+    - name: Package dependencies
+      shell: msys2 {0}
+      run: |
+        export PATH="/ucrt64/bin:/usr/bin:$PATH"
+        mkdir -p artifact
+        
+        # Ищем собранный .exe
+        if [ -f "release/nesca.exe" ]; then
+          cp release/nesca.exe artifact/
+        elif [ -f "src/release/nesca.exe" ]; then
+          cp src/release/nesca.exe artifact/
+        elif [ -f "nesca.exe" ]; then
+          cp nesca.exe artifact/
+        else
+          echo "Исполняемый файл не найден!"
+          find . -name "*.exe"
+          exit 1
+        fi
+        
+        # Собираем DLL
+        cd artifact
+        ldd nesca.exe | grep "ucrt64/bin" | awk '{print $3}' | xargs -I {} cp {} . || true
+        
         # Копируем списки паролей
-        cp -r pwd_lists final_build/ || true
+        if [ -d "../pwd_lists" ]; then
+          cp -r ../pwd_lists .
+        elif [ -d "../src/pwd_lists" ]; then
+          cp -r ../src/pwd_lists .
+        fi
+        
+        cd ..
+        zip -r nesca-windows.zip artifact/
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: nesca-windows
-        path: final_build/
+        name: nesca-windows-build
+        path: nesca-windows.zip
