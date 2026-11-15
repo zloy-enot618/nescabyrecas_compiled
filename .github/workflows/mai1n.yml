@@ -20,6 +20,7 @@ jobs:
           mingw-w64-ucrt-x86_64-toolchain
           mingw-w64-ucrt-x86_64-qt5-base
           mingw-w64-ucrt-x86_64-qt5-multimedia
+          mingw-w64-ucrt-x86_64-qt5-tools
           mingw-w64-ucrt-x86_64-libssh
           mingw-w64-ucrt-x86_64-curl
           mingw-w64-ucrt-x86_64-openssl
@@ -43,7 +44,7 @@ jobs:
         if [ -f "nesca.pro" ]; then qmake nesca.pro; elif [ -f "src/nesca.pro" ]; then cd src; qmake nesca.pro; fi
         mingw32-make -j$(nproc)
 
-    - name: Package dependencies
+    - name: Package dependencies (The Right Way)
       shell: msys2 {0}
       run: |
         export PATH="/ucrt64/bin:/usr/bin:$PATH"
@@ -56,15 +57,14 @@ jobs:
         
         cd artifact
         
-        # Копируем библиотеки
-        ldd nesca.exe | grep "ucrt64/bin" | awk '{print $3}' | xargs -I {} cp {} . || true
+        # ВОЛШЕБНАЯ КОМАНДА (сама находит и копирует все DLL, плагины и компилятор)
+        windeployqt --release --compiler-runtime --no-translations nesca.exe
         
-        # КОПИРУЕМ ПЛАГИНЫ QT (это исправляет ошибку)
-        mkdir -p plugins/platforms
-        cp /ucrt64/share/qt5/plugins/platforms/qwindows.dll plugins/platforms/
-        cp /ucrt64/share/qt5/plugins/imageformats/*.dll plugins/ 2>/dev/null || true
-        cp /ucrt64/share/qt5/plugins/styles/*.dll plugins/ 2>/dev/null || true
+        # Создаем конфиг, который жестко указывает программе искать плагины на своем месте
+        echo "[Paths]" > qt.conf
+        echo "Plugins=." >> qt.conf
         
+        # Копируем списки паролей
         if [ -d "../pwd_lists" ]; then cp -r ../pwd_lists .; fi
         if [ -d "../src/pwd_lists" ]; then cp -r ../src/pwd_lists .; fi
         
