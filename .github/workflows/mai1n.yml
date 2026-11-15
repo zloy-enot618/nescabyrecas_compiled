@@ -1,1 +1,78 @@
-qmake -tp vc nesca.pro
+name: Build Nesca (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-toolchain
+          mingw-w64-ucrt-x86_64-qt5-base
+          mingw-w64-ucrt-x86_64-qt5-multimedia
+          mingw-w64-ucrt-x86_64-libssh
+          mingw-w64-ucrt-x86_64-curl
+          mingw-w64-ucrt-x86_64-openssl
+          zip
+
+    - name: Fix code and add Windows libs
+      shell: msys2 {0}
+      run: |
+        if [ ! -f /ucrt64/bin/qmake.exe ]; then
+          ln -s /ucrt64/bin/qmake-qt5.exe /ucrt64/bin/qmake.exe || true
+        fi
+        find . -name "*.cpp" -o -name "*.h" | xargs sed -i 's/CURLINFO_LASTSOCKET/CURLINFO_ACTIVESOCKET/g' || true
+        sed -i '1i #include <cmath>' DrawerTh_ME2Scanner.cpp
+        sed -i '1i #include <cmath>' MainStarter.cpp
+        echo "LIBS += -liphlpapi -lws2_32 -lcrypt32 -lwsock32" >> nesca.pro
+
+    - name: Build project
+      shell: msys2 {0}
+      run: |
+        export PATH="/ucrt64/bin:/usr/bin:$PATH"
+        if [ -f "nesca.pro" ]; then qmake nesca.pro; elif [ -f "src/nesca.pro" ]; then cd src; qmake nesca.pro; fi
+        mingw32-make -j$(nproc)
+
+    - name: Package dependencies
+      shell: msys2 {0}
+      run: |
+        export PATH="/ucrt64/bin:/usr/bin:$PATH"
+        mkdir -p artifact
+        
+        # Копируем exe
+        if [ -f "release/nesca.exe" ]; then cp release/nesca.exe artifact/
+        elif [ -f "src/release/nesca.exe" ]; then cp src/release/nesca.exe artifact/
+        elif [ -f "nesca.exe" ]; then cp nesca.exe artifact/; fi
+        
+        cd artifact
+        
+        # Копируем библиотеки
+        ldd nesca.exe | grep "ucrt64/bin" | awk '{print $3}' | xargs -I {} cp {} . || true
+        
+        # КОПИРУЕМ ПЛАГИНЫ QT (это исправляет ошибку)
+        mkdir -p plugins/platforms
+        cp /ucrt64/share/qt5/plugins/platforms/qwindows.dll plugins/platforms/
+        cp /ucrt64/share/qt5/plugins/imageformats/*.dll plugins/ 2>/dev/null || true
+        cp /ucrt64/share/qt5/plugins/styles/*.dll plugins/ 2>/dev/null || true
+        
+        if [ -d "../pwd_lists" ]; then cp -r ../pwd_lists .; fi
+        if [ -d "../src/pwd_lists" ]; then cp -r ../src/pwd_lists .; fi
+        
+        cd ..
+        zip -r nesca-windows.zip artifact/
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nesca-windows-build
+        path: nesca-windows.zip
