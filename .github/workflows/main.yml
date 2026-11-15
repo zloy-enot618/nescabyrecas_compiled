@@ -25,7 +25,7 @@ jobs:
           mingw-w64-ucrt-x86_64-openssl
           zip
 
-    - name: Fix code for modern compilers
+    - name: Fix code and add Windows libs
       shell: msys2 {0}
       run: |
         # 1. Создаем ссылку qmake
@@ -36,8 +36,12 @@ jobs:
         # 2. Исправляем curl
         find . -name "*.cpp" -o -name "*.h" | xargs sed -i 's/CURLINFO_LASTSOCKET/CURLINFO_ACTIVESOCKET/g' || true
         
-        # 3. Добавляем библиотеку математики для функции log()
+        # 3. Добавляем математику
         sed -i '1i #include <cmath>' DrawerTh_ME2Scanner.cpp
+        sed -i '1i #include <cmath>' MainStarter.cpp
+        
+        # 4. Прописываем линковку Windows-библиотек, которые MinGW проигнорировал в #pragma
+        echo "LIBS += -liphlpapi -lws2_32 -lcrypt32 -lwsock32" >> nesca.pro
 
     - name: Build project
       shell: msys2 {0}
@@ -51,7 +55,6 @@ jobs:
           qmake nesca.pro
         fi
         
-        # Убрали команду "|| make", чтобы не было путаницы в логах
         mingw32-make -j$(nproc)
 
     - name: Package dependencies
